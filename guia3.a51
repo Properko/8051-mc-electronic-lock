@@ -2,15 +2,24 @@
 $include(DISPLAY_LOOKUP.INC)
 
 ; define global variables
-BLOCK_SIZE EQU 8
+BLOCK_SIZE EQU 9
 
 PB1 EQU P0.6
 PB2 EQU P0.7
 
+NUMBER_1 EQU R2
+NUMBER_2 EQU R3
+NUMBER_3 EQU R4
+NUMBER_4 EQU R5
+
+COUNTER_INVALID_KEYS EQU 0
+TIMEOUT EQU 30
+VALID_KEY EQU 1
+
 NOT_INITIALIZED EQU 0FFH
 
 ; we have a way of representing 16 numbers on the display (0-F)
-NUMBER_COUNT EQU 16
+NUMBER_COUNT EQU 10
 
 ; CALL INIT
 CSEG	AT	0H
@@ -26,58 +35,223 @@ INIT:
 	
 	LJMP MAIN
 MAIN:
-	MOV R0, #01H
-	MOV R1, #02H
-	MOV R2, #03H
-	MOV R3, #04H
-    CALL ENCRYPT_KEY_R2_R3_R4_R5_INTO_R6_R7
+	; --- display 'L'
+	MOV R0, #0AH
+	CALL DISPLAY_R0
+
 	MOV R0, #00H
 	MOV R1, #00H
-	MOV R2, #00H
-	MOV R3, #00H
-    CALL DECRYPT_KEY_R6_R7_INTO_R2_R3_R4_R5
+
+	; --- if port P0 != 0
+	;MOV A, P0
+	;CJNE A, #0FH, RESET_TO_DEFAULT_KEY
+
+	MOV NUMBER_1, #01H
+	MOV NUMBER_2, #02H
+	MOV NUMBER_3, #03H
+	MOV NUMBER_4, #04H
+
+	; --- encrypt and store key
+	CALL SET_NUMBERS_TO_R6_R7
+    CALL ENCRYPT_KEY
+
+	MOV NUMBER_1, #NOT_INITIALIZED
+	MOV NUMBER_2, #NOT_INITIALIZED
+	MOV NUMBER_3, #NOT_INITIALIZED
+	MOV NUMBER_4, #NOT_INITIALIZED
+
+LOOP:
+	; if PB1 is pushed => change number for selecting
+	JNB PB1, SELECT_NUMBERS
+
+	; if PB2 is pushed => set number
+	JNB PB2, LOOP
+
+	SJMP LOOP
+	SELECT_NUMBERS:
+		JNB PB1, $
+		CALL SELECT_NUMBER
+		CALL SELECT_NUMBER
+		CALL SELECT_NUMBER
+		CALL SELECT_NUMBER
+
+	CALL DECRYPT_KEY
+    CALL VALID_PASSWORD
+	CALL ENCRYPT_KEY
+
+	MOV A, VALID_KEY
+	CJNE A, #1, INVALID_PASSWORD
+
+	; --- display 'O'
+	MOV R0, #0BH
+	CALL DISPLAY_R0
+	MOV R0, #00H
+
+	CALL DISPLAY_OVERFLOW
 RET
 
-ENCRYPT_KEY_R2_R3_R4_R5_INTO_R6_R7:
-    MOV A, R2
-    XRL A, #0FH
+VALID_PASSWORD:
+	; --- valid first NUMBER_1, NUMBER_2
+	MOV A, NUMBER_1
+    MOV B, #010H
+    MUL AB
+    MOV R0, A
+
+	MOV A, NUMBER_2
+	ADD A, R0
+	MOV R0, #00H
+
+	XRL A, R6
+	CJNE A, #00H, INVALID_KEY
+
+	; --- valid first NUMBER_3, NUMBER_4
+	MOV A, NUMBER_3
+    MOV B, #010H
+    MUL AB
+    MOV R0, A
+
+	MOV A, NUMBER_4
+	ADD A, R0
+	MOV R0, #00H
+
+	XRL A, R7
+	CJNE A, #00H, INVALID_KEY
+
+	MOV VALID_KEY, #1
+	RET
+
+	INVALID_KEY:
+		MOV VALID_KEY, #0
+		RET
+
+INVALID_PASSWORD:
+	; --- display 'F'
+	MOV R0, #0DH
+	CALL DISPLAY_R0
+	MOV R0, #00H
+
+	INC COUNTER_INVALID_KEYS
+	CJNE A, #5, ALERT
+	BLOCK_TIMEOUT:
+		RET
+	ALERT:
+		; --- display 'b'
+		MOV R0, #0CH
+		CALL DISPLAY_R0
+		MOV R0, #00H
+		RET
+
+RESET_TO_DEFAULT_KEY:
+	; --- set default key to 1234
+	MOV NUMBER_1, #01H
+	MOV NUMBER_2, #02H
+	MOV NUMBER_3, #03H
+	MOV NUMBER_4, #04H
+
+	; --- set HW_FLAG(port 0) to '0'
+	MOV A, #00H
+	MOV P0, A
+RET
+
+SET_NUMBERS_TO_R6_R7:
+	MOV A, NUMBER_1
     MOV B, #010H
     MUL AB
     MOV R6, A
-
-    MOV A, R3
-    XRL A, #0FH
-    MOV B, #010H
+	MOV A, NUMBER_2
 	ADD A, R6
     MOV R6, A
 
-    MOV A, R4
-    XRL A, #0FH
+	MOV A, NUMBER_3
     MOV B, #010H
     MUL AB
     MOV R7, A
-
-    MOV A, R5
-    XRL A, #0FH
-    MOV B, #010H
+	MOV A, NUMBER_4
 	ADD A, R7
     MOV R7, A
 RET
 
-DECRYPT_KEY_R6_R7_INTO_R2_R3_R4_R5:
+ENCRYPT_KEY:
     MOV A, R6
     XRL A, #0FFH
-    MOV B, #010H
-    DIV AB
-    MOV R2, A
-    MOV R3, B
+    MOV R6, A
 
     MOV A, R7
     XRL A, #0FFH
-    MOV B, #010H
-    DIV AB
-    MOV R4, A
-    MOV R5, B
+    MOV R7, A
+RET
+
+DECRYPT_KEY:
+    MOV A, R6
+    XRL A, #0FFH
+	MOV R6, A
+
+	MOV A, R7
+    XRL A, #0FFH
+	MOV R7, A
+RET
+
+SELECT_NUMBER:
+	CALL DISPLAY_R0
+
+	; if PB1 is pushed => change number for selecting
+	JNB PB1, CHANGE_NUMBER
+
+	; if PB2 is pushed => set number
+	JNB PB2, SET_NUMBER
+
+	SJMP SELECT_NUMBER
+	CHANGE_NUMBER:
+		JNB PB1, $
+		INC R0
+
+		; --- mod 10
+		MOV R1, #NUMBER_COUNT
+		CALL MOD_R0_R1
+
+		SJMP SELECT_NUMBER
+	SET_NUMBER:
+		JNB PB2, $
+
+		; if number_1 is alrady set, set number 2
+		CJNE NUMBER_1, #NOT_INITIALIZED, SET_NUMBER2
+
+		MOV A, R0
+		MOV NUMBER_1, A
+		MOV R0, #0
+		RET
+
+	SET_NUMBER2:
+		; if number_2 is alrady set, set number 3
+		CJNE NUMBER_2, #NOT_INITIALIZED, SET_NUMBER3
+
+		MOV A, R0
+		MOV NUMBER_2, A
+		MOV R0, #0
+		RET
+
+	SET_NUMBER3:
+		; if number_3 is alrady set, set number 4
+		CJNE NUMBER_3, #NOT_INITIALIZED, SET_NUMBER4
+
+		MOV A, R0
+		MOV NUMBER_3, A
+		MOV R0, #0
+		RET
+
+	SET_NUMBER4:
+		MOV A, R0
+		MOV NUMBER_4, A
+		MOV R0, #0
+		RET
+RET
+
+MOD_R0_R1:
+	; --- modulus used by register R1
+	MOV A, R0
+	MOV B, R1
+	DIV AB
+	MOV R0, B
 RET
 
 DISPLAY_R0:
@@ -86,6 +260,11 @@ DISPLAY_R0:
 	MOV A, R0
 	MOVC A, @A+DPTR
 	MOV P2, A
+RET
+
+DISPLAY_OVERFLOW:
+	; light up the (overflow) dot
+	CLR P2.7
 RET
 
 END
