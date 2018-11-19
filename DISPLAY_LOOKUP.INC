@@ -1,0 +1,5 @@
+DISPLAY_LOOKUP SEGMENT CODE
+	
+RSEG DISPLAY_LOOKUP
+;			0	  1     2     3     4     5     6     7     8     9     A     B     C     D     E     F   
+TABLE:   DB 0C0H, 0F9H, 0A4H, 0B0H, 099H, 092H, 082H, 0F8H, 080H, 090H, 088H, 080H, 0C6H, 0C0H, 086H, 08EH
